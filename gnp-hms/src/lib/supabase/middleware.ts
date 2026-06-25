@@ -1,0 +1,64 @@
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
+
+export async function updateSession(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({ request })
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value)
+          )
+          supabaseResponse = NextResponse.next({ request })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+
+  const { data: { user } } = await supabase.auth.getUser()
+
+  // If no user and not on auth pages, redirect to login
+  if (!user && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/register')) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    return NextResponse.redirect(url)
+  }
+
+  // If user exists, get their role and redirect to correct dashboard
+  if (user && (request.nextUrl.pathname === '/' || request.nextUrl.pathname === '/login')) {
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('role')
+      .eq('user_id', user.id)
+      .single()
+
+    if (profile) {
+      const url = request.nextUrl.clone()
+      const roleRoutes: Record<string, string> = {
+        patient: '/patient',
+        doctor: '/doctor',
+        nurse: '/nurse',
+        receptionist: '/receptionist',
+        pharmacist: '/pharmacist',
+        lab_technician: '/lab',
+        accountant: '/accountant',
+        admin: '/admin',
+        super_admin: '/admin',
+      }
+      url.pathname = roleRoutes[profile.role] || '/login'
+      return NextResponse.redirect(url)
+    }
+  }
+
+  return supabaseResponse
+}
